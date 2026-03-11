@@ -1,81 +1,99 @@
-import express from 'express';
-import WebSocket from 'ws';
-import http from 'http';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import rateLimit from 'express-rate-limit';
-import helmet from 'helmet';
-import cors from 'cors';
-import dotenv from 'dotenv';
+import express from "express";
+import http from "http";
+import WebSocket from "ws";
+import path from "path";
+import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
+import cors from "cors";
+import dotenv from "dotenv";
 
 dotenv.config();
+
+/* ----------------------------- ENV VALIDATION ----------------------------- */
+
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  console.error("❌ JWT_SECRET missing from environment variables.");
+  process.exit(1);
+}
+
+/* ------------------------------ PATH SETUP ------------------------------ */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/* ------------------------------ EXPRESS APP ------------------------------ */
+
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'NotMagic_Secure_Key_2026';
+const wss = new WebSocket.Server({
+  server,
+  maxPayload: 1024 * 1024
+});
 
-// Security middleware
+/* ------------------------------ MIDDLEWARE ------------------------------ */
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, "public")));
 
-// Rate limiting
-const limiter = rateLimit({
+/* ------------------------------ RATE LIMITS ------------------------------ */
+
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100
+  max: 20
 });
-app.use(limiter);
 
-// In-memory databases
-let users = new Map();
-let messages = [];
-let dmMessages = new Map();
-let userSessions = new Map();
+app.use("/api/login", authLimiter);
+app.use("/api/register", authLimiter);
 
-// Rank hierarchy and permissions
+/* ------------------------------ HEALTH CHECK ------------------------------ */
+
+app.get("/", (req, res) => {
+  res.json({
+    service: "NotMagic Chat",
+    status: "online",
+    uptime: process.uptime()
+  });
+});
+
+/* ------------------------------ DATABASE (MEMORY) ------------------------------ */
+
+const users = new Map();
+const messages = [];
+const dmMessages = new Map();
+const userSessions = new Map();
+
+const MAX_MESSAGES = 100;
+const MAX_DM_MESSAGES = 100;
+
+/* ------------------------------ RANK SYSTEM ------------------------------ */
+
 const RANKS = {
-  OWNER: { level: 5, color: '#FF00FF', permissions: ['ban', 'kick', 'timeout'] },
-  CO_OWNER: { level: 4, color: '#FF00FF', permissions: ['ban', 'kick', 'timeout'] },
-  SENIOR_ADMIN: { level: 3, color: '#00FFFF', permissions: ['kick', 'timeout'] },
-  ADMIN: { level: 2, color: '#00FF00', permissions: ['kick', 'timeout'] },
-  TRIAL_ADMIN: { level: 1, color: '#FFFF00', permissions: ['timeout'] },
-  MEMBER: { level: 0, color: '#FFFFFF', permissions: [] }
+  OWNER: { level: 5, permissions: ["ban", "kick", "timeout"] },
+  CO_OWNER: { level: 4, permissions: ["ban", "kick", "timeout"] },
+  SENIOR_ADMIN: { level: 3, permissions: ["kick", "timeout"] },
+  ADMIN: { level: 2, permissions: ["kick", "timeout"] },
+  TRIAL_ADMIN: { level: 1, permissions: ["timeout"] },
+  MEMBER: { level: 0, permissions: [] }
 };
 
-const DEFAULT_USER = {
-  username: 'NotMagic',
-  password: 'Kiomara@8',
-  rank: 'OWNER'
-};
+/* ------------------------------ UTILITIES ------------------------------ */
 
-// Initialize default user
-const saltRounds = 10;
-bcrypt.hash(DEFAULT_USER.password, saltRounds, (err, hash) => {
-  if (!err) {
-    users.set(DEFAULT_USER.username, {
-      username: DEFAULT_USER.username,
-      passwordHash: hash,
-      rank: DEFAULT_USER.rank,
-      profilePicture: null,
-      createdAt: new Date(),
-      isBanned: false,
-      timeoutUntil: null
-    });
-  }
-});
+const sanitize = (text = "") =>
+  text
+    .replace(/[<>"']/g, "")
+    .substring(0, 500);
 
-// Utility functions
 function generateToken(username) {
-  return jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
+  return jwt.sign({ username }, JWT_SECRET, { expiresIn: "24h" });
 }
 
 function verifyToken(token) {
@@ -86,304 +104,180 @@ function verifyToken(token) {
   }
 }
 
-function sanitizeInput(input) {
-  return input
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .substring(0, 500);
-}
+/* ------------------------------ AUTH API ------------------------------ */
 
-// Auth endpoints
-app.post('/api/register', async (req, res) => {
+app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password required' });
-  }
+  if (!username || !password)
+    return res.status(400).json({ error: "Missing credentials" });
 
-  if (username.length < 3 || password.length < 6) {
-    return res.status(400).json({ error: 'Username must be 3+ chars, password 6+ chars' });
-  }
-
-  if (users.has(username)) {
-    return res.status(409).json({ error: 'User already exists' });
-  }
+  if (users.has(username))
+    return res.status(409).json({ error: "User exists" });
 
   try {
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await bcrypt.hash(password, 10);
+
     users.set(username, {
       username,
       passwordHash,
-      rank: 'MEMBER',
-      profilePicture: null,
+      rank: "MEMBER",
       createdAt: new Date(),
-      isBanned: false,
-      timeoutUntil: null
+      isBanned: false
     });
 
-    const token = generateToken(username);
-    res.json({ token, username });
+    res.json({
+      token: generateToken(username),
+      username
+    });
   } catch {
-    res.status(500).json({ error: 'Registration failed' });
+    res.status(500).json({ error: "Registration failed" });
   }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
 
   const user = users.get(username);
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
+  if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  const validPassword = await bcrypt.compare(password, user.passwordHash);
-  if (!validPassword) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
+  const valid = await bcrypt.compare(password, user.passwordHash);
 
-  const token = generateToken(username);
-  res.json({ token, username, rank: user.rank });
-});
-
-app.get('/api/user/:username', (req, res) => {
-  const user = users.get(req.params.username);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
+  if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
   res.json({
-    username: user.username,
-    rank: user.rank,
-    profilePicture: user.profilePicture,
-    isBanned: user.isBanned
+    token: generateToken(username),
+    username,
+    rank: user.rank
   });
 });
 
-// WebSocket handling
-wss.on('connection', (ws) => {
+/* ------------------------------ WEBSOCKET ------------------------------ */
+
+wss.on("connection", (ws) => {
   let currentUser = null;
+  ws.isAlive = true;
 
-  ws.on('message', async (data) => {
+  ws.on("pong", () => (ws.isAlive = true));
+
+  ws.on("message", async (data) => {
+    let message;
+
     try {
-      const message = JSON.parse(data);
+      message = JSON.parse(data);
+    } catch {
+      ws.send(JSON.stringify({ type: "error", error: "Invalid JSON" }));
+      return;
+    }
 
-      // Authentication
-      if (message.type === 'auth') {
-        const decoded = verifyToken(message.token);
-        if (!decoded) {
-          ws.send(JSON.stringify({ type: 'error', error: 'Invalid token' }));
-          ws.close();
-          return;
-        }
+    /* -------- AUTH -------- */
 
-        const user = users.get(decoded.username);
-        if (user.isBanned) {
-          ws.send(JSON.stringify({ type: 'error', error: 'You are banned' }));
-          ws.close();
-          return;
-        }
+    if (message.type === "auth") {
+      const decoded = verifyToken(message.token);
 
-        currentUser = decoded.username;
-        userSessions.set(currentUser, ws);
-        
-        ws.send(JSON.stringify({
-          type: 'auth_success',
+      if (!decoded) {
+        ws.close();
+        return;
+      }
+
+      const user = users.get(decoded.username);
+
+      if (!user || user.isBanned) {
+        ws.close();
+        return;
+      }
+
+      currentUser = decoded.username;
+      userSessions.set(currentUser, ws);
+
+      ws.send(
+        JSON.stringify({
+          type: "auth_success",
           user: {
             username: currentUser,
-            rank: user.rank,
-            profilePicture: user.profilePicture
+            rank: user.rank
           }
-        }));
+        })
+      );
 
-        // Broadcast online users
-        broadcastOnlineUsers();
-        return;
-      }
+      broadcastOnlineUsers();
+      return;
+    }
 
-      if (!currentUser) {
-        ws.send(JSON.stringify({ type: 'error', error: 'Not authenticated' }));
-        return;
-      }
+    if (!currentUser) return;
 
-      const user = users.get(currentUser);
+    const user = users.get(currentUser);
 
-      // Check if user is timed out
-      if (user.timeoutUntil && new Date() < new Date(user.timeoutUntil)) {
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          error: 'You are timed out' 
-        }));
-        return;
-      }
+    /* -------- GLOBAL CHAT -------- */
 
-      // Global chat message
-      if (message.type === 'chat') {
-        const sanitizedText = sanitizeInput(message.text);
-        const chatMessage = {
-          id: Date.now(),
-          username: currentUser,
-          text: sanitizedText,
-          rank: user.rank,
-          profilePicture: user.profilePicture,
-          timestamp: new Date(),
-          reactions: []
-        };
+    if (message.type === "chat") {
+      const chatMessage = {
+        id: Date.now(),
+        username: currentUser,
+        text: sanitize(message.text),
+        rank: user.rank,
+        timestamp: Date.now(),
+        reactions: []
+      };
 
-        messages.push(chatMessage);
-        if (messages.length > 100) messages.shift();
+      messages.push(chatMessage);
 
-        broadcastMessage({
-          type: 'chat',
-          message: chatMessage
-        });
-      }
+      if (messages.length > MAX_MESSAGES) messages.shift();
 
-      // Direct message
-      if (message.type === 'dm') {
-        const recipient = message.recipient;
-        if (!users.has(recipient)) {
-          ws.send(JSON.stringify({ type: 'error', error: 'User not found' }));
-          return;
-        }
+      broadcast({
+        type: "chat",
+        message: chatMessage
+      });
+    }
 
-        const dmKey = [currentUser, recipient].sort().join(':');
-        if (!dmMessages.has(dmKey)) {
-          dmMessages.set(dmKey, []);
-        }
+    /* -------- DM -------- */
 
-        const dm = {
-          id: Date.now(),
-          sender: currentUser,
-          recipient,
-          text: sanitizeInput(message.text),
-          replyTo: message.replyTo || null,
-          reactions: [],
-          timestamp: new Date()
-        };
+    if (message.type === "dm") {
+      const recipient = message.recipient;
 
-        dmMessages.get(dmKey).push(dm);
+      if (!users.has(recipient)) return;
 
-        // Send to recipient
-        const recipientWs = userSessions.get(recipient);
-        if (recipientWs) {
-          recipientWs.send(JSON.stringify({
-            type: 'dm',
+      const key = [currentUser, recipient].sort().join(":");
+
+      if (!dmMessages.has(key)) dmMessages.set(key, []);
+
+      const dm = {
+        id: Date.now(),
+        sender: currentUser,
+        recipient,
+        text: sanitize(message.text),
+        timestamp: Date.now()
+      };
+
+      const list = dmMessages.get(key);
+
+      list.push(dm);
+
+      if (list.length > MAX_DM_MESSAGES) list.shift();
+
+      const recipientWS = userSessions.get(recipient);
+
+      if (recipientWS) {
+        recipientWS.send(
+          JSON.stringify({
+            type: "dm",
             message: dm
-          }));
-        }
-
-        ws.send(JSON.stringify({
-          type: 'dm_sent',
-          message: dm
-        }));
+          })
+        );
       }
 
-      // Message reaction
-      if (message.type === 'react') {
-        if (message.isGlobalChat) {
-          const msg = messages.find(m => m.id === message.messageId);
-          if (msg) {
-            const reaction = { user: currentUser, emoji: message.emoji };
-            msg.reactions.push(reaction);
-            broadcastMessage({
-              type: 'reaction',
-              messageId: message.messageId,
-              reactions: msg.reactions
-            });
-          }
-        }
-      }
-
-      // Moderation: Timeout
-      if (message.type === 'timeout' && RANKS[user.rank].permissions.includes('timeout')) {
-        const targetUser = users.get(message.targetUsername);
-        if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
-          const timeoutMinutes = message.minutes || 5;
-          targetUser.timeoutUntil = new Date(Date.now() + timeoutMinutes * 60000);
-          
-          const targetWs = userSessions.get(message.targetUsername);
-          if (targetWs) {
-            targetWs.send(JSON.stringify({
-              type: 'moderation',
-              action: 'timeout',
-              duration: timeoutMinutes
-            }));
-          }
-
-          broadcastMessage({
-            type: 'system',
-            text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
-          });
-        }
-      }
-
-      // Moderation: Kick
-      if (message.type === 'kick' && RANKS[user.rank].permissions.includes('kick')) {
-        const targetUser = users.get(message.targetUsername);
-        if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
-          const targetWs = userSessions.get(message.targetUsername);
-          if (targetWs) {
-            targetWs.send(JSON.stringify({
-              type: 'moderation',
-              action: 'kick',
-              reason: message.reason || 'You were kicked'
-            }));
-            targetWs.close();
-          }
-
-          userSessions.delete(message.targetUsername);
-          broadcastMessage({
-            type: 'system',
-            text: `${message.targetUsername} was kicked by ${currentUser}`
-          });
-        }
-      }
-
-      // Moderation: Ban
-      if (message.type === 'ban' && RANKS[user.rank].permissions.includes('ban')) {
-        const targetUser = users.get(message.targetUsername);
-        if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
-          targetUser.isBanned = true;
-
-          const targetWs = userSessions.get(message.targetUsername);
-          if (targetWs) {
-            targetWs.send(JSON.stringify({
-              type: 'moderation',
-              action: 'ban',
-              reason: message.reason || 'You were banned'
-            }));
-            targetWs.close();
-          }
-
-          userSessions.delete(message.targetUsername);
-          broadcastMessage({
-            type: 'system',
-            text: `${message.targetUsername} was banned by ${currentUser}`
-          });
-        }
-      }
-
-      // Voice chat signal
-      if (message.type === 'voice_signal') {
-        const recipientWs = userSessions.get(message.recipient);
-        if (recipientWs) {
-          recipientWs.send(JSON.stringify({
-            type: 'voice_signal',
-            sender: currentUser,
-            signal: message.signal
-          }));
-        }
-      }
-
-    } catch (error) {
-      console.error('WebSocket error:', error);
-      ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' }));
+      ws.send(JSON.stringify({ type: "dm_sent", message: dm }));
     }
   });
 
-  ws.on('close', () => {
+  ws.on("close", () => {
+    if (currentUser) {
+      userSessions.delete(currentUser);
+      broadcastOnlineUsers();
+    }
+  });
+
+  ws.on("error", () => {
     if (currentUser) {
       userSessions.delete(currentUser);
       broadcastOnlineUsers();
@@ -391,31 +285,56 @@ wss.on('connection', (ws) => {
   });
 });
 
-function broadcastMessage(data) {
-  wss.clients.forEach(client => {
+/* ------------------------------ BROADCAST ------------------------------ */
+
+function broadcast(data) {
+  const message = JSON.stringify(data);
+
+  for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
+      client.send(message);
     }
-  });
+  }
 }
 
 function broadcastOnlineUsers() {
-  const onlineUsers = Array.from(userSessions.keys()).map(username => {
-    const user = users.get(username);
-    return {
-      username,
-      rank: user.rank,
-      profilePicture: user.profilePicture
-    };
-  });
+  const online = [];
 
-  broadcastMessage({
-    type: 'online_users',
-    users: onlineUsers
+  for (const username of userSessions.keys()) {
+    const user = users.get(username);
+
+    online.push({
+      username,
+      rank: user.rank
+    });
+  }
+
+  broadcast({
+    type: "online_users",
+    users: online
   });
 }
 
-server.listen(PORT, () => {
-  console.log(`🚀 NotMagic Chat Server running on port ${PORT}`);
-  console.log('🔐 Security enabled with Helmet and rate limiting');
+/* ------------------------------ HEARTBEAT ------------------------------ */
+
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) return ws.terminate();
+
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 30000);
+
+/* ------------------------------ SERVER START ------------------------------ */
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 NotMagic Chat running on port ${PORT}`);
+});
+
+/* ------------------------------ GRACEFUL SHUTDOWN ------------------------------ */
+
+process.on("SIGTERM", () => {
+  console.log("Shutting down...");
+  server.close(() => process.exit(0));
 });
