@@ -312,11 +312,9 @@ wss.on('connection', (ws) => {
           }
 
           broadcastMessage({
-            type: 'system',
-            text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
-            \
-`
-          });
+  type: 'system',
+  text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
+});
         }
       }
 
@@ -334,10 +332,10 @@ wss.on('connection', (ws) => {
           }
 
           userSessions.delete(message.targetUsername);
-          broadcastMessage({
-            type: 'system',
-            text: \
-`${message.targetUsername} was kicked by ${currentUser}`\n          });
+         broadcastMessage({
+  type: 'system',
+  text: `${message.targetUsername} was kicked by ${currentUser}`
+});
         }
       }
 
@@ -358,10 +356,9 @@ wss.on('connection', (ws) => {
 
           userSessions.delete(message.targetUsername);
           broadcastMessage({
-            type: 'system',
-            text: \
-        \
-`${message.targetUsername} was banned by ${currentUser}`\n          });
+  type: 'system',
+  text: `${message.targetUsername} was banned by ${currentUser}`
+});
         }
       }
 
