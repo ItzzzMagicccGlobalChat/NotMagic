@@ -296,7 +296,8 @@ wss.on('connection', (ws) => {
         }
       }
 
-      text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
+      // Moderation: Timeout
+      if (message.type === 'timeout' && RANKS[user.rank].permissions.includes('timeout')) {
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           const timeoutMinutes = message.minutes || 5;
@@ -312,13 +313,14 @@ wss.on('connection', (ws) => {
           }
 
           broadcastMessage({
-  type: 'system',
-  text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
-});
+            type: 'system',
+            text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
+          });
         }
       }
 
-      text: `${message.targetUsername} was kicked by ${currentUser}`
+      // Moderation: Kick
+      if (message.type === 'kick' && RANKS[user.rank].permissions.includes('kick')) {
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           const targetWs = userSessions.get(message.targetUsername);
@@ -332,14 +334,15 @@ wss.on('connection', (ws) => {
           }
 
           userSessions.delete(message.targetUsername);
-         broadcastMessage({
-  type: 'system',
-  text: `${message.targetUsername} was kicked by ${currentUser}`
-});
+          broadcastMessage({
+            type: 'system',
+            text: `${message.targetUsername} was kicked by ${currentUser}`
+          });
         }
       }
 
-      text: `${message.targetUsername} was banned by ${currentUser}`
+      // Moderation: Ban
+      if (message.type === 'ban' && RANKS[user.rank].permissions.includes('ban')) {
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           targetUser.isBanned = true;
@@ -356,9 +359,9 @@ wss.on('connection', (ws) => {
 
           userSessions.delete(message.targetUsername);
           broadcastMessage({
-  type: 'system',
-  text: `${message.targetUsername} was banned by ${currentUser}`
-});
+            type: 'system',
+            text: `${message.targetUsername} was banned by ${currentUser}`
+          });
         }
       }
 
