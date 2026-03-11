@@ -1,0 +1,1 @@
+{\n  "version": 2,\n  "build": {\n    "env": {\n      "NODE_ENV": "production"\n    }\n  },\n  "deploy": {\n    "preview": "your-preview-url.com",\n    "production": "your-production-url.com"\n  }\n}
