@@ -314,8 +314,7 @@ wss.on('connection', (ws) => {
 
           broadcastMessage({
             type: 'system',
-            text: \\`
-              ${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}
+            text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
             \
 `
           });
