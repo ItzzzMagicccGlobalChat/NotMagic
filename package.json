@@ -1,1 +1,7 @@
-{"name": "notmagic-chat","version": "1.0.0","description": "Dynamic global chat platform with real-time messaging, voice chat, and moderation","main": "server.js","type": "module","scripts": {"start": "node server.js","dev": "nodemon server.js","test": "echo \"Error: no test specified\" && exit 1"},"keywords": ["chat", "websocket", "voice", "moderation"],"author": "NotMagic","license": "MIT","dependencies": {"express": "^4.18.2","ws": "^8.13.0","bcryptjs": "^2.4.3","jsonwebtoken": "^9.0.0","helmet": "^7.0.0","rate-limit": "^1.1.0","express-rate-limit": "^6.7.0","dotenv": "^16.0.3","cors": "^2.8.5"},"devDependencies": {"nodemon": "^2.0.20"}}
+{
+  "name": "notmagic-chat",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
