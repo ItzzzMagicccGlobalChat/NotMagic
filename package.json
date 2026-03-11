@@ -1,10 +1,14 @@
 {
-"name": "notmagic-chat",
+"name": "notmagic chat",
 "version": "1.0.0",
+"description": "Stable NotMagic chat server",
 "type": "module",
 "main": "server.js",
 "scripts": {
 "start": "node server.js"
+},
+"engines": {
+"node": ">=20"
 },
 "dependencies": {
 "bcryptjs": "^2.4.3",
