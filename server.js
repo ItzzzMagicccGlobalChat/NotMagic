@@ -296,8 +296,7 @@ wss.on('connection', (ws) => {
         }
       }
 
-      // Moderation: Timeout
-      if (message.type === 'timeout' && RANKS[user.rank].permissions.includes('timeout')) {
+      text: `${message.targetUsername} was timed out for ${timeoutMinutes} minutes by ${currentUser}`
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           const timeoutMinutes = message.minutes || 5;
@@ -321,8 +320,7 @@ wss.on('connection', (ws) => {
         }
       }
 
-      // Moderation: Kick
-      if (message.type === 'kick' && RANKS[user.rank].permissions.includes('kick')) {
+      text: `${message.targetUsername} was kicked by ${currentUser}`
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           const targetWs = userSessions.get(message.targetUsername);
@@ -343,8 +341,7 @@ wss.on('connection', (ws) => {
         }
       }
 
-      // Moderation: Ban
-      if (message.type === 'ban' && RANKS[user.rank].permissions.includes('ban')) {
+      text: `${message.targetUsername} was banned by ${currentUser}`
         const targetUser = users.get(message.targetUsername);
         if (targetUser && RANKS[targetUser.rank].level < RANKS[user.rank].level) {
           targetUser.isBanned = true;
